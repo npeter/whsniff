@@ -41,6 +41,10 @@
 
 #pragma pack(push, 1)
 
+#define _FWRITE(...)
+//#define _FWRITE(...) fwrite(__VA_ARGS__)
+#define _PRINTF(...) printf(__VA_ARGS__)
+
 // https://wiki.wireshark.org/Development/LibpcapFileFormat
 typedef struct pcap_hdr_s
 {
@@ -98,6 +102,13 @@ static volatile unsigned int signal_exit = 0;
 static uint16_t update_crc_ccitt(uint16_t crc, uint8_t c);
 static uint16_t ieee802154_crc16(uint8_t *tvb, uint32_t offset, uint32_t len);
 
+static int ttt_out(uint8_t *out, int len) {
+	for (int i=0; i<len; i++) {
+		printf(" %02x", *out++);
+	}
+	printf("\n");
+	return 1;
+}
 
 //--------------------------------------------
 static int packet_handler(unsigned char *buf, int cnt, uint8_t keep_original_fcs)
@@ -126,6 +137,7 @@ static int packet_handler(unsigned char *buf, int cnt, uint8_t keep_original_fcs
 	switch (usb_header->type)
 	{
 		case 0:
+			
 			if (sizeof(usb_data_header_type) > cnt)
 				return -1;
 			usb_data_header = (usb_data_header_type *)buf;
@@ -136,6 +148,8 @@ static int packet_handler(unsigned char *buf, int cnt, uint8_t keep_original_fcs
 			{
 				break;
 			}
+
+			printf("usb_header_type: data len: %d\n", usb_data_header->wpan_len);
 
 			// SmartRF™ Packet Sniffer User’s Manual (SWRU187G)
 			// Timestamp:
@@ -161,7 +175,7 @@ static int packet_handler(unsigned char *buf, int cnt, uint8_t keep_original_fcs
 			pcaprec_hdr.incl_len = (uint32_t)usb_data_header->wpan_len;
 			pcaprec_hdr.orig_len = (uint32_t)usb_data_header->wpan_len;
 
-			fwrite(&pcaprec_hdr, sizeof(pcaprec_hdr), 1, stdout);
+			_FWRITE(&pcaprec_hdr, sizeof(pcaprec_hdr), 1, stdout); 
 
 			// SmartRF™ Packet Sniffer User’s Manual (SWRU187G)
 			// FCS:
@@ -172,10 +186,10 @@ static int packet_handler(unsigned char *buf, int cnt, uint8_t keep_original_fcs
 			// If Correlation not used: LQI.
 
 			if (keep_original_fcs)
-				fwrite(&buf[sizeof(usb_data_header_type)], 1, usb_data_header->wpan_len, stdout);
+				_FWRITE(&buf[sizeof(usb_data_header_type)], 1, usb_data_header->wpan_len, stdout); 
 			else
 			{
-				fwrite(&buf[sizeof(usb_data_header_type)], 1, usb_data_header->wpan_len - 2, stdout);
+				_FWRITE(&buf[sizeof(usb_data_header_type)], 1, usb_data_header->wpan_len - 2, stdout);
 				fcs = 0;
 				if (buf[sizeof(usb_data_header_type) + usb_data_header->wpan_len - 1] & 0x80)
 				{
@@ -184,7 +198,9 @@ static int packet_handler(unsigned char *buf, int cnt, uint8_t keep_original_fcs
 				}
 				le_fcs = htole16(fcs);
 
-				fwrite(&le_fcs, sizeof(le_fcs), 1, stdout);
+				_FWRITE(&le_fcs, sizeof(le_fcs), 1, stdout);
+
+				ttt_out(&buf[sizeof(usb_data_header_type)], usb_data_header->wpan_len - 2);
 			}
 			fflush(stdout);
 
@@ -244,6 +260,8 @@ int main(int argc, char *argv[])
 		exit(EXIT_FAILURE);
 	}
 
+	_PRINTF("whsniff start\n");
+
 	option = 0;
 	while ((option = getopt(argc, argv, "c:k")) != -1)
 	{
@@ -294,7 +312,7 @@ int main(int argc, char *argv[])
 		libusb_get_device_descriptor(device, &t_desc);
 		if(t_desc.idVendor == 0x0451 && t_desc.idProduct == 0x16ae)
 		{
-			// printf("Found device %04x:%04x (bcdDevice: %04x)\n", t_desc.idVendor, t_desc.idProduct, t_desc.bcdDevice);
+			_PRINTF("Found device %04x:%04x (bcdDevice: %04x)\n", t_desc.idVendor, t_desc.idProduct, t_desc.bcdDevice);
 			if(libusb_open(device, &handle) != 0)
 			{
 				fprintf(stderr, "--> unable to open device.\n");
@@ -367,7 +385,7 @@ int main(int argc, char *argv[])
 	// start sniffing
 	res = libusb_control_transfer(handle, 0x40, 208, 0, 0, NULL, 0, TIMEOUT);
 
-	fwrite(&pcap_hdr, sizeof(pcap_hdr), 1, stdout);
+	_FWRITE(&pcap_hdr, sizeof(pcap_hdr), 1, stdout);
 	fflush(stdout);
 
 	while (!signal_exit)
@@ -409,6 +427,7 @@ int main(int argc, char *argv[])
 	// power off radio, wIndex = 0
 	res = libusb_control_transfer(handle, 0x40, 197, 0, 0, NULL, 0, TIMEOUT);
 
+	_PRINTF("whsniff exit\n");
 
 	// clearing
 	res = libusb_release_interface(handle, 0);
